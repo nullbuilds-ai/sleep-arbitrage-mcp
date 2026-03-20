@@ -1,10 +1,11 @@
 {
   "name": "sleep-arbitrage-mcp",
-  "version": "0.3.1",
-  "description": "MCP server for Sleep Arbitrage task intake -- queue tasks for overnight agent execution",
+  "version": "0.4.0",
+  "description": "Queue work before you sleep, get results in the morning. MCP server + worker.",
   "type": "module",
   "bin": {
-    "sleep-arbitrage-mcp": "./dist/index.js"
+    "sleep-arbitrage-mcp": "./dist/index.js",
+    "sleep-arbitrage-worker": "./dist/worker.js"
   },
   "main": "./dist/index.js",
   "scripts": {
@@ -18,6 +19,9 @@
     "resend": "^6.9.4",
     "zod": "^3.22.0"
   },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",
@@ -25,13 +29,18 @@
   },
   "files": [
     "dist",
+    "worker.py",
+    "examples",
     "README.md"
   ],
   "keywords": [
     "mcp",
     "sleep-arbitrage",
     "task-queue",
-    "agents"
+    "agents",
+    "overnight",
+    "worker",
+    "claude"
   ],
   "author": "nullbuilds",
   "license": "MIT"

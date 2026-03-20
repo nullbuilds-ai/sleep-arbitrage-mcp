@@ -130,18 +130,19 @@ Pass `delivery_email` or `delivery_webhook` when queuing. Both optional, both in
 
 ## Worker (agent side)
 
-The MCP server is the intake layer. The worker is the execution layer. It claims tasks, runs them through Claude, and writes results back.
+The worker is bundled in the same package. No separate install.
 
 ### Quick start
 
 ```bash
-pip install anthropic
+# Check the queue
+sleep-arbitrage-worker status
 
 # Process all queued tasks
-ANTHROPIC_API_KEY=sk-... python worker.py drain
+ANTHROPIC_API_KEY=sk-... sleep-arbitrage-worker drain
 
 # Process one task and exit
-ANTHROPIC_API_KEY=sk-... python worker.py once
+ANTHROPIC_API_KEY=sk-... sleep-arbitrage-worker once
 ```
 
 ### How it works
@@ -169,7 +170,7 @@ ANTHROPIC_API_KEY=sk-... python worker.py once
 **cron** (Linux/macOS):
 ```bash
 # Every 30 minutes from 11pm to 7am
-*/30 23,0-7 * * * ANTHROPIC_API_KEY=sk-... python3 /path/to/worker.py drain
+*/30 23,0-7 * * * ANTHROPIC_API_KEY=sk-... sleep-arbitrage-worker drain
 ```
 
 **launchd** (macOS): See [`examples/launchd.plist`](examples/launchd.plist) for a ready-to-use template.
@@ -189,9 +190,13 @@ WantedBy=timers.target
 The worker uses a simple system prompt for general research/analysis tasks. To specialize it:
 
 - **Swap the model**: Set `SLEEP_ARBITRAGE_MODEL` to any Anthropic model
-- **Change the prompt**: Edit `SYSTEM_PROMPT` in `worker.py`
-- **Add tools**: Extend `execute_task()` with MCP clients, web search, file access, etc.
-- **Use your own LLM**: Replace the `anthropic` client with any API. The worker is just Python.
+- **Change the prompt**: Edit `SYSTEM_PROMPT` in `src/worker.ts`
+- **Add tools**: Extend `executeTask()` with MCP clients, web search, file access, etc.
+- **Use your own LLM**: Replace the Anthropic client with any API
+
+### Python worker
+
+A standalone Python worker (`worker.py`) is also included for environments where Node.js isn't available or you prefer Python. Same logic, same task store.
 
 ---
 
@@ -202,7 +207,7 @@ The worker uses a simple system prompt for general research/analysis tasks. To s
 | **1. Intake** | ✅ Shipped | Task queue, 5 MCP tools, JSON storage |
 | **2. Delivery** | ✅ Shipped | Email + webhook on completion |
 | **3. Agent Pickup** | ✅ Shipped | `claim_next`, priority, expiry |
-| **4. Worker** | ✅ Shipped | Python reference worker, Claude API, scheduling templates |
+| **4. Worker** | ✅ Shipped | Bundled TypeScript worker + Python fallback, scheduling templates |
 | **5. Hosted Service** | Next | Web dashboard, agent fleet, SLA tiers |
 | **6. Orchestration** | Future | Task chains, agent-to-agent handoff, SDK |
 
