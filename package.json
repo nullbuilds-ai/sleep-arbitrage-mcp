@@ -1,6 +1,6 @@
 {
   "name": "sleep-arbitrage-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MCP server for Sleep Arbitrage task intake -- queue tasks for overnight agent execution",
   "type": "module",
   "bin": {
