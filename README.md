@@ -1,6 +1,12 @@
 <div align="center">
 
-# sleep arbitrage
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
+  <img alt="sleep arbitrage" src="assets/logo-dark.svg" width="400">
+</picture>
+
+<br><br>
 
 **Queue work before you sleep. Get results in the morning.**
 
