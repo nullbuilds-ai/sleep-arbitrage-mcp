@@ -9,6 +9,7 @@ export interface Task {
   task: string;
   context?: string;
   delivery_email?: string;
+  delivery_webhook?: string;
   status: TaskStatus;
   created_at: string;
   updated_at: string;
@@ -33,7 +34,8 @@ function save(tasks: Task[]): void {
 export function queueTask(
   task: string,
   context?: string,
-  delivery_email?: string
+  delivery_email?: string,
+  delivery_webhook?: string
 ): Task {
   const tasks = load();
   const now = new Date().toISOString();
@@ -42,6 +44,7 @@ export function queueTask(
     task,
     context,
     delivery_email,
+    delivery_webhook,
     status: "queued",
     created_at: now,
     updated_at: now,

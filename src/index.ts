@@ -2,11 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { queueTask, listTasks, getTask, updateTaskStatus } from "./store.js";
+import { deliverResult } from "./deliver.js";
 import type { TaskStatus } from "./store.js";
 
 const server = new McpServer({
   name: "sleep-arbitrage",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 server.tool(
@@ -23,14 +24,22 @@ server.tool(
       .email()
       .optional()
       .describe("Where to send results when complete."),
+    delivery_webhook: z
+      .string()
+      .url()
+      .optional()
+      .describe("Webhook URL to POST results to when complete."),
   },
-  async ({ task, context, delivery_email }) => {
-    const entry = queueTask(task, context, delivery_email);
+  async ({ task, context, delivery_email, delivery_webhook }) => {
+    const entry = queueTask(task, context, delivery_email, delivery_webhook);
+    const deliveryMethods: string[] = [];
+    if (entry.delivery_email) deliveryMethods.push(`Email: ${entry.delivery_email}`);
+    if (entry.delivery_webhook) deliveryMethods.push(`Webhook: ${entry.delivery_webhook}`);
     return {
       content: [
         {
           type: "text",
-          text: `Task queued.\n\nID: ${entry.id}\nStatus: ${entry.status}\nQueued at: ${entry.created_at}\n\nTask: ${entry.task}${entry.context ? `\nContext: ${entry.context}` : ""}${entry.delivery_email ? `\nDeliver to: ${entry.delivery_email}` : ""}`,
+          text: `Task queued.\n\nID: ${entry.id}\nStatus: ${entry.status}\nQueued at: ${entry.created_at}\n\nTask: ${entry.task}${entry.context ? `\nContext: ${entry.context}` : ""}${deliveryMethods.length > 0 ? `\nDelivery: ${deliveryMethods.join(", ")}` : "\nDelivery: none configured"}`,
         },
       ],
     };
@@ -94,7 +103,8 @@ server.tool(
       `Updated: ${task.updated_at}`,
       `Task: ${task.task}`,
       task.context ? `Context: ${task.context}` : null,
-      task.delivery_email ? `Deliver to: ${task.delivery_email}` : null,
+      task.delivery_email ? `Email delivery: ${task.delivery_email}` : null,
+      task.delivery_webhook ? `Webhook delivery: ${task.delivery_webhook}` : null,
       task.result ? `Result:\n${task.result}` : null,
     ].filter(Boolean);
     return {
@@ -105,7 +115,7 @@ server.tool(
 
 server.tool(
   "update_task",
-  "Update a task's status or attach a result. Used by agents completing overnight work.",
+  "Update a task's status or attach a result. Used by agents completing overnight work. Automatically delivers results via email/webhook when status is set to completed.",
   {
     id: z.string().describe("Task ID (full or first 8 characters)."),
     status: z.enum(["queued", "in_progress", "completed", "cancelled"]),
@@ -128,11 +138,36 @@ server.tool(
         content: [{ type: "text", text: "Update failed." }],
       };
     }
+
+    // Deliver results when task is completed
+    let deliveryReport = "";
+    if (status === "completed" && (updated.delivery_email || updated.delivery_webhook)) {
+      const delivery = await deliverResult(updated);
+      const parts: string[] = [];
+      if (delivery.email) {
+        parts.push(
+          delivery.email.sent
+            ? `Email sent to ${updated.delivery_email}`
+            : `Email failed: ${delivery.email.error}`
+        );
+      }
+      if (delivery.webhook) {
+        parts.push(
+          delivery.webhook.sent
+            ? `Webhook delivered (${delivery.webhook.status})`
+            : `Webhook failed: ${delivery.webhook.error}`
+        );
+      }
+      if (parts.length > 0) {
+        deliveryReport = `\nDelivery: ${parts.join(", ")}`;
+      }
+    }
+
     return {
       content: [
         {
           type: "text",
-          text: `Updated.\n\nID: ${updated.id}\nStatus: ${updated.status}\nUpdated: ${updated.updated_at}${updated.result ? `\nResult: ${updated.result}` : ""}`,
+          text: `Updated.\n\nID: ${updated.id}\nStatus: ${updated.status}\nUpdated: ${updated.updated_at}${updated.result ? `\nResult: ${updated.result}` : ""}${deliveryReport}`,
         },
       ],
     };
