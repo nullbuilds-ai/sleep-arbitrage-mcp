@@ -8,16 +8,20 @@ Built for [Sleep Arbitrage](https://nullbuilds.eth) -- the overnight agent fleet
 
 ## What it does
 
-You talk to Claude. You say "queue this for tonight." It's logged, timestamped, and ready for an agent to pick up and execute. When the work is done, the result gets delivered back to you via email or webhook.
+You talk to Claude. You say "queue this for tonight." It's logged, timestamped, and ready for an agent to pick up and execute overnight.
 
-Four tools. Local JSON storage. Automatic delivery on completion. No database required.
+Next morning, you ask Claude "what finished?" and it tells you.
+
+The MCP server is the inbox and the outbox. No dashboard, no email, no extra app. You're already in Claude. That's the interface.
+
+Four tools. Local JSON storage. No database required.
 
 | Tool | What it does |
 |------|-------------|
-| `queue_task` | Submit a task with optional context, delivery email, and webhook URL |
+| `queue_task` | Submit a task with optional context |
 | `list_tasks` | View all tasks, optionally filtered by status |
 | `get_task` | Fetch full details by ID |
-| `update_task` | Update status or attach a result. Automatically delivers via email/webhook on completion. |
+| `update_task` | Update status or attach a result (used by agents) |
 
 ---
 
@@ -37,24 +41,14 @@ Add to your `claude_desktop_config.json`:
     "sleep-arbitrage": {
       "command": "sleep-arbitrage-mcp",
       "env": {
-        "SLEEP_ARBITRAGE_DATA_FILE": "/path/to/tasks.json",
-        "RESEND_API_KEY": "re_your_key_here",
-        "SLEEP_ARBITRAGE_FROM_EMAIL": "results@yourdomain.com"
+        "SLEEP_ARBITRAGE_DATA_FILE": "/path/to/tasks.json"
       }
     }
   }
 }
 ```
 
-### Environment variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `SLEEP_ARBITRAGE_DATA_FILE` | No | `./tasks.json` | Path to the JSON task store |
-| `RESEND_API_KEY` | No | -- | [Resend](https://resend.com) API key for email delivery |
-| `SLEEP_ARBITRAGE_FROM_EMAIL` | No | `results@sleeparbitrage.com` | Sender address for delivery emails |
-
-Email delivery requires a Resend API key. Webhook delivery works without any configuration.
+`SLEEP_ARBITRAGE_DATA_FILE` defaults to `tasks.json` in the current working directory.
 
 ## Run from source
 
@@ -67,38 +61,40 @@ npm run build
 
 ---
 
-## Delivery
+## How it works
 
-When a task is marked `completed` via `update_task`, results are automatically delivered through any channels configured at queue time:
+**You, at 11pm:**
+> "Queue a task: research the top 5 MCP hosting services with pricing. Focus on indie dev and small team tiers."
 
-**Email** -- A formatted email with the task description, context, and result. Powered by [Resend](https://resend.com).
+**Agent, at 3am:**
+> Picks up the task, does the work, calls `update_task` with the result.
 
-**Webhook** -- A POST request to your URL with the full task payload:
+**You, at 7am:**
+> "What finished overnight?"
 
-```json
-{
-  "event": "task.completed",
-  "task": {
-    "id": "abc-123",
-    "task": "Research competitor pricing",
-    "status": "completed",
-    "result": "Here's what I found...",
-    "created_at": "2026-03-20T06:00:00Z",
-    "updated_at": "2026-03-20T14:00:00Z"
-  }
-}
-```
-
-Both channels are optional and independent. Configure one, both, or neither per task.
+That's it. No notifications to configure. No dashboard to check. You ask Claude, Claude asks the MCP server.
 
 ---
 
 ## Task lifecycle
 
 ```
-queued -> in_progress -> completed -> [email + webhook delivery]
+queued -> in_progress -> completed
                       -> cancelled
 ```
+
+---
+
+## Optional: Email + webhook delivery
+
+For automated delivery outside of Claude (CI pipelines, team workflows, hosted service), tasks support optional email and webhook notifications on completion.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `RESEND_API_KEY` | No | -- | [Resend](https://resend.com) API key for email delivery |
+| `SLEEP_ARBITRAGE_FROM_EMAIL` | No | `results@sleeparbitrage.com` | Sender address for delivery emails |
+
+Pass `delivery_email` or `delivery_webhook` when queuing a task. Both are optional. Most users won't need either.
 
 ---
 
@@ -110,11 +106,9 @@ Task queue with local JSON storage. Four MCP tools. Works today.
 
 ### Phase 2 -- Delivery (shipped)
 
-Automatic email and webhook delivery when tasks complete. Resend for email, raw POST for webhooks.
+Optional email (Resend) and webhook delivery on task completion. Zero-config for the default flow.
 
 ### Phase 3 -- Auth + Multi-user
-
-Right now it's local, single-user. Phase 3 makes it shareable.
 
 - API key authentication
 - Per-user task namespacing
@@ -129,7 +123,6 @@ The self-hosted version stays free and open source. The hosted version is Sleep 
 - Web dashboard to view and manage tasks
 - Agent fleet on the backend -- tasks are actually executed, not just stored
 - Guaranteed turnaround windows (overnight, 4-hour, 1-hour)
-- Pricing: $500-2K/mo depending on volume and SLA
 
 ### Phase 5 -- Agent Orchestration Primitive
 
