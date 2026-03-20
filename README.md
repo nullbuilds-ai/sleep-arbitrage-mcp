@@ -14,14 +14,15 @@ Next morning, you ask Claude "what finished?" and it tells you.
 
 The MCP server is the inbox and the outbox. No dashboard, no email, no extra app. You're already in Claude. That's the interface.
 
-Four tools. Local JSON storage. No database required.
+Five tools. Local JSON storage. No database required.
 
 | Tool | What it does |
 |------|-------------|
-| `queue_task` | Submit a task with optional context |
+| `queue_task` | Submit a task with priority, expiry, and optional delivery config |
+| `claim_next` | Grab the next task from the queue (highest priority, oldest first) |
 | `list_tasks` | View all tasks, optionally filtered by status |
 | `get_task` | Fetch full details by ID |
-| `update_task` | Update status or attach a result (used by agents) |
+| `update_task` | Mark done and attach results. Auto-delivers via email/webhook if configured. |
 
 ---
 
@@ -67,7 +68,7 @@ npm run build
 > "Queue a task: research the top 5 MCP hosting services with pricing. Focus on indie dev and small team tiers."
 
 **Agent, at 3am:**
-> Picks up the task, does the work, calls `update_task` with the result.
+> Calls `claim_next`, gets the highest-priority task, does the work, calls `update_task` with the result.
 
 **You, at 7am:**
 > "What finished overnight?"
@@ -76,11 +77,33 @@ That's it. No notifications to configure. No dashboard to check. You ask Claude,
 
 ---
 
+## Agent pickup
+
+The `claim_next` tool is how agents work through the queue. It's atomic: grabs the next task and sets it to `in_progress` in one operation. No double-pickup, no race conditions.
+
+Claim order: **urgent > normal > low**, then oldest first within each priority level.
+
+An overnight agent loop looks like this:
+
+```
+1. claim_next          -> get a task
+2. do the work
+3. update_task         -> attach result, mark completed
+4. repeat until claim_next returns empty
+```
+
+## Priority and expiry
+
+Tasks have three priority levels: `urgent`, `normal` (default), and `low`.
+
+Tasks can optionally expire. Pass `expires_in_hours` when queuing. Expired tasks are automatically marked `expired` and skipped by `claim_next`.
+
 ## Task lifecycle
 
 ```
-queued -> in_progress -> completed
-                      -> cancelled
+queued -> [claimed via claim_next] -> in_progress -> completed -> [delivery]
+                                                  -> cancelled
+queued -> [expires_in_hours elapsed] -> expired
 ```
 
 ---
@@ -102,27 +125,25 @@ Pass `delivery_email` or `delivery_webhook` when queuing a task. Both are option
 
 ### Phase 1 -- Intake (shipped)
 
-Task queue with local JSON storage. Four MCP tools. Works today.
+Task queue with local JSON storage. Four MCP tools.
 
 ### Phase 2 -- Delivery (shipped)
 
-Optional email (Resend) and webhook delivery on task completion. Zero-config for the default flow.
+Optional email (Resend) and webhook delivery on task completion.
 
-### Phase 3 -- Auth + Multi-user
+### Phase 3 -- Agent Pickup (shipped)
 
-- API key authentication
-- Per-user task namespacing
-- Read-only vs. write access tokens
-- Team queues (multiple users, one queue)
+`claim_next` for agents to work through the queue. Priority levels. Task expiry. The overnight loop.
 
 ### Phase 4 -- Hosted Service
 
 The self-hosted version stays free and open source. The hosted version is Sleep Arbitrage.
 
 - Cloud-hosted queue, no local setup
-- Web dashboard to view and manage tasks
+- Web dashboard to view, schedule, and manage tasks
 - Agent fleet on the backend -- tasks are actually executed, not just stored
 - Guaranteed turnaround windows (overnight, 4-hour, 1-hour)
+- Token/usage tracking
 
 ### Phase 5 -- Agent Orchestration Primitive
 
@@ -130,7 +151,6 @@ The longer play: this becomes infrastructure for multi-agent workflows.
 
 - Agent-to-agent task handoff (one agent queues for another)
 - Dependency chains (task B runs when task A completes)
-- Priority queuing
 - Execution history and audit log
 - SDK for programmatic access
 

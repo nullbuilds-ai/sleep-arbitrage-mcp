@@ -1,13 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { queueTask, listTasks, getTask, updateTaskStatus } from "./store.js";
+import { queueTask, listTasks, getTask, claimNext, updateTaskStatus } from "./store.js";
 import { deliverResult } from "./deliver.js";
-import type { TaskStatus } from "./store.js";
+import type { TaskStatus, TaskPriority } from "./store.js";
 
 const server = new McpServer({
   name: "sleep-arbitrage",
-  version: "0.2.0",
+  version: "0.3.0",
 });
 
 server.tool(
@@ -19,6 +19,15 @@ server.tool(
       .string()
       .optional()
       .describe("Background info, constraints, or links the agent will need."),
+    priority: z
+      .enum(["urgent", "normal", "low"])
+      .optional()
+      .describe("Task priority. Urgent tasks get claimed first. Defaults to normal."),
+    expires_in_hours: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Hours until this task expires if not claimed. Omit for no expiry."),
     delivery_email: z
       .string()
       .email()
@@ -30,19 +39,55 @@ server.tool(
       .optional()
       .describe("Webhook URL to POST results to when complete."),
   },
-  async ({ task, context, delivery_email, delivery_webhook }) => {
-    const entry = queueTask(task, context, delivery_email, delivery_webhook);
-    const deliveryMethods: string[] = [];
-    if (entry.delivery_email) deliveryMethods.push(`Email: ${entry.delivery_email}`);
-    if (entry.delivery_webhook) deliveryMethods.push(`Webhook: ${entry.delivery_webhook}`);
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Task queued.\n\nID: ${entry.id}\nStatus: ${entry.status}\nQueued at: ${entry.created_at}\n\nTask: ${entry.task}${entry.context ? `\nContext: ${entry.context}` : ""}${deliveryMethods.length > 0 ? `\nDelivery: ${deliveryMethods.join(", ")}` : "\nDelivery: none configured"}`,
-        },
-      ],
-    };
+  async ({ task, context, priority, expires_in_hours, delivery_email, delivery_webhook }) => {
+    const entry = queueTask(
+      task,
+      context,
+      delivery_email,
+      delivery_webhook,
+      (priority as TaskPriority) ?? "normal",
+      expires_in_hours
+    );
+    const details: string[] = [
+      `Task queued.`,
+      ``,
+      `ID: ${entry.id}`,
+      `Priority: ${entry.priority}`,
+      `Status: ${entry.status}`,
+      `Queued at: ${entry.created_at}`,
+    ];
+    if (entry.expires_at) details.push(`Expires at: ${entry.expires_at}`);
+    details.push(``, `Task: ${entry.task}`);
+    if (entry.context) details.push(`Context: ${entry.context}`);
+    if (entry.delivery_email) details.push(`Email delivery: ${entry.delivery_email}`);
+    if (entry.delivery_webhook) details.push(`Webhook delivery: ${entry.delivery_webhook}`);
+    return { content: [{ type: "text", text: details.join("\n") }] };
+  }
+);
+
+server.tool(
+  "claim_next",
+  "Claim the next available task from the queue. Returns the highest-priority, oldest queued task and sets it to in_progress. Used by agents working through the overnight queue.",
+  {},
+  async () => {
+    const task = claimNext();
+    if (!task) {
+      return {
+        content: [{ type: "text", text: "No tasks in the queue." }],
+      };
+    }
+    const lines = [
+      `Claimed.`,
+      ``,
+      `ID: ${task.id}`,
+      `Priority: ${task.priority}`,
+      `Claimed at: ${task.claimed_at}`,
+      ``,
+      `Task: ${task.task}`,
+    ];
+    if (task.context) lines.push(`Context: ${task.context}`);
+    if (task.expires_at) lines.push(`Expires at: ${task.expires_at}`);
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 );
 
@@ -51,7 +96,7 @@ server.tool(
   "List all queued and completed tasks.",
   {
     status: z
-      .enum(["queued", "in_progress", "completed", "cancelled"])
+      .enum(["queued", "in_progress", "completed", "cancelled", "expired"])
       .optional()
       .describe("Filter by status. Omit to list all."),
   },
@@ -69,7 +114,7 @@ server.tool(
     }
     const lines = tasks.map(
       (t) =>
-        `[${t.status.toUpperCase()}] ${t.id.slice(0, 8)} -- ${t.task.slice(0, 80)}${t.task.length > 80 ? "..." : ""} (${t.created_at.slice(0, 10)})`
+        `[${t.status.toUpperCase()}] [${t.priority}] ${t.id.slice(0, 8)} -- ${t.task.slice(0, 70)}${t.task.length > 70 ? "..." : ""} (${t.created_at.slice(0, 10)})`
     );
     return {
       content: [
@@ -98,15 +143,18 @@ server.tool(
     }
     const lines = [
       `ID: ${task.id}`,
+      `Priority: ${task.priority}`,
       `Status: ${task.status}`,
       `Created: ${task.created_at}`,
       `Updated: ${task.updated_at}`,
-      `Task: ${task.task}`,
-      task.context ? `Context: ${task.context}` : null,
-      task.delivery_email ? `Email delivery: ${task.delivery_email}` : null,
-      task.delivery_webhook ? `Webhook delivery: ${task.delivery_webhook}` : null,
-      task.result ? `Result:\n${task.result}` : null,
-    ].filter(Boolean);
+    ];
+    if (task.claimed_at) lines.push(`Claimed: ${task.claimed_at}`);
+    if (task.expires_at) lines.push(`Expires: ${task.expires_at}`);
+    lines.push(`Task: ${task.task}`);
+    if (task.context) lines.push(`Context: ${task.context}`);
+    if (task.delivery_email) lines.push(`Email delivery: ${task.delivery_email}`);
+    if (task.delivery_webhook) lines.push(`Webhook delivery: ${task.delivery_webhook}`);
+    if (task.result) lines.push(`Result:\n${task.result}`);
     return {
       content: [{ type: "text", text: lines.join("\n") }],
     };
@@ -139,7 +187,6 @@ server.tool(
       };
     }
 
-    // Deliver results when task is completed
     let deliveryReport = "";
     if (status === "completed" && (updated.delivery_email || updated.delivery_webhook)) {
       const delivery = await deliverResult(updated);
